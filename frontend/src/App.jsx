@@ -11,7 +11,9 @@ function App() {
   const messagesEndRef = useRef(null)
 
   useEffect(() => {
-    const newSocket = io("http://localhost:5000");
+    const newSocket = io("https://ghostchat-fv0m.onrender.com", {
+      transports: ["websocket"]
+    });
     setSocket(newSocket);
 
     newSocket.on('receive_message', (message) => {
