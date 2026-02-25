@@ -8,6 +8,8 @@ function App() {
   const [messages, setMessages] = useState([])
   const [isJoined, setIsJoined] = useState(false)
   const [lastSentMessage, setLastSentMessage] = useState('')
+  const [ghostMode, setGhostMode] = useState(false)
+  const [ghostTimer, setGhostTimer] = useState(5000)
   const messagesEndRef = useRef(null)
 
   useEffect(() => {
@@ -18,9 +20,27 @@ function App() {
 
     newSocket.on('receive_message', (message) => {
       console.log('Received message:', message, 'Last sent:', lastSentMessage);
+      
+      // Always handle as normal message (remove ghost mode disappearing logic)
       if (message !== lastSentMessage) {
-        setMessages(prev => [...prev, { id: Date.now(), text: message, isOwn: false }])
+        setMessages(prev => [...prev, { 
+          id: Date.now(), 
+          text: message, 
+          isOwn: false,
+          isGhost: false 
+        }]);
       }
+    })
+
+    newSocket.on('ghost_mode_updated', ({ enabled, timer }) => {
+      console.log('Ghost mode updated:', enabled, timer);
+      setGhostMode(enabled);
+      setGhostTimer(timer);
+    })
+
+    newSocket.on('clear_chat', () => {
+      console.log('Clear chat received');
+      setMessages([]);
     })
 
     newSocket.on('connect', () => {
@@ -62,9 +82,41 @@ function App() {
     if (!isJoined || !currentMessage.trim() || !socket) return
     
     console.log('Sending message:', currentMessage, 'to room:', roomId);
-    socket.emit('send_message', { roomId, message: currentMessage })
-    setMessages(prev => [...prev, { id: Date.now(), text: currentMessage, isOwn: true }])
-    setCurrentMessage('')
+    setLastSentMessage(currentMessage);
+    
+    // Always add message as permanent (remove ghost mode disappearing logic)
+    setMessages(prev => [...prev, { 
+      id: Date.now(), 
+      text: currentMessage, 
+      isOwn: true,
+      isGhost: false 
+    }]);
+    
+    socket.emit('send_message', { roomId, message: currentMessage });
+    setCurrentMessage('');
+  }
+
+  const toggleGhostMode = () => {
+    if (!socket || !roomId) return
+    
+    const newMode = !ghostMode;
+    setGhostMode(newMode);
+    
+    socket.emit('toggle_ghost_mode', {
+      roomId,
+      enabled: newMode,
+      timer: ghostTimer
+    });
+  }
+
+  const clearChat = () => {
+    if (!socket || !roomId) return
+    
+    // Clear local messages
+    setMessages([]);
+    
+    // Notify other user to clear their chat
+    socket.emit('clear_chat', { roomId });
   }
 
   return (
@@ -157,7 +209,9 @@ function App() {
       <div style={{
         width: '70%',
         display: 'flex',
-        flexDirection: 'column'
+        flexDirection: 'column',
+        position: 'relative',
+        zIndex: 1
       }}>
         {/* Header */}
         <div style={{
@@ -165,13 +219,70 @@ function App() {
           padding: '20px',
           borderBottom: '1px solid #333'
         }}>
-          <h1 style={{
-            color: 'white',
-            margin: 0,
-            fontSize: '1.8rem'
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: '10px'
           }}>
-            GhostChat 👻
-          </h1>
+            <h1 style={{
+              color: 'white',
+              margin: 0,
+              fontSize: '1.8rem'
+            }}>
+              GhostChat 👻
+            </h1>
+            {isJoined && (
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px'
+              }}>
+                <button
+                  onClick={clearChat}
+                  style={{
+                    padding: '8px 16px',
+                    backgroundColor: '#ff4444',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '20px',
+                    fontSize: '14px',
+                    cursor: 'pointer',
+                    fontWeight: 'bold'
+                  }}
+                >
+                  🗑️ Clear Chat
+                </button>
+                <button
+                  onClick={toggleGhostMode}
+                  style={{
+                    padding: '8px 16px',
+                    backgroundColor: ghostMode ? '#4a9eff' : '#2a2a2a',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '20px',
+                    fontSize: '14px',
+                    cursor: 'pointer',
+                    fontWeight: 'bold',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}
+                >
+                  👻 Ghost Mode
+                </button>
+              </div>
+            )}
+          </div>
+          {isJoined && ghostMode && (
+            <div style={{
+              color: '#4a9eff',
+              fontSize: '12px',
+              fontWeight: 'bold'
+            }}>
+              👻 Ghost Mode ON
+            </div>
+          )}
         </div>
 
         {/* Messages Section */}
@@ -181,7 +292,8 @@ function App() {
           overflowY: 'auto',
           display: 'flex',
           flexDirection: 'column',
-          gap: '10px'
+          gap: '10px',
+          background: ghostMode ? 'radial-gradient(ellipse at center, rgba(74, 158, 255, 0.05) 0%, transparent 70%)' : 'transparent'
         }}>
           {messages.map(msg => (
             <div key={msg.id} style={{
@@ -194,8 +306,42 @@ function App() {
                 backgroundColor: msg.isOwn ? '#4a9eff' : '#2a2a2a',
                 color: 'white',
                 borderRadius: '18px',
-                wordWrap: 'break-word'
+                fontSize: '14px',
+                wordWrap: 'break-word',
+                position: 'relative',
+                boxShadow: ghostMode ? '0 0 20px rgba(74, 158, 255, 0.3), 0 0 40px rgba(74, 158, 255, 0.1)' : 'none',
+                border: ghostMode ? '1px solid rgba(74, 158, 255, 0.3)' : 'none',
+                animation: ghostMode ? 'twinkle 2s ease-in-out infinite alternate' : 'none'
               }}>
+                {ghostMode && (
+                  <>
+                    <span style={{
+                      position: 'absolute',
+                      top: '-5px',
+                      left: '-5px',
+                      fontSize: '10px',
+                      animation: 'sparkle 1.5s ease-in-out infinite',
+                      animationDelay: '0s'
+                    }}>✨</span>
+                    <span style={{
+                      position: 'absolute',
+                      top: '-3px',
+                      right: '-8px',
+                      fontSize: '8px',
+                      animation: 'sparkle 1.5s ease-in-out infinite',
+                      animationDelay: '0.5s'
+                    }}>⭐</span>
+                    <span style={{
+                      position: 'absolute',
+                      bottom: '-5px',
+                      left: '50%',
+                      transform: 'translateX(-50%)',
+                      fontSize: '9px',
+                      animation: 'sparkle 1.5s ease-in-out infinite',
+                      animationDelay: '1s'
+                    }}>💫</span>
+                  </>
+                )}
                 {msg.text}
               </div>
             </div>
